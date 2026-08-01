@@ -1,0 +1,22 @@
+# 大数据/生成物 不入库
+Sort By mode/
+data/raw/
+data/audio/
+data/vis/
+data/cache/
+checkpoints/
+logs/
+
+# 大文件类型
+*.zip
+*.mcz
+*.ogg
+*.mp3
+*.npy
+*.ckpt
+*.png
+
+# Python
+__pycache__/
+*.pyc
+.venv/
