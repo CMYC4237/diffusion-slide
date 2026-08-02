@@ -9,7 +9,9 @@ EPOCHS=${EPOCHS:-80}
 BATCH=${BATCH:-8}
 SAMPLES=${SAMPLES:-5000}
 VAE_CKPT=${VAE_CKPT:-checkpoints/vae/best.ckpt}
-export CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0,2}
+GPUS=${GPUS:-0,2}
+export CUDA_VISIBLE_DEVICES=$GPUS
+echo "使用物理卡: $CUDA_VISIBLE_DEVICES (可用 GPUS=1,3 bash $0 覆盖)"
 
 torchrun --nproc_per_node=2 --master_port=29501 \
     train/train_diffusion.py \
