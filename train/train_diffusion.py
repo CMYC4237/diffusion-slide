@@ -187,9 +187,12 @@ def main():
         if rank == 0:
             print(f"[resume] 从 epoch {start_ep} 继续 (ckpt={last_path})", flush=True)
 
-    ddpm = raw_ddpm
+    # DDP: 包装实际被调用的 UNet 层 (training_losses 内部 self.unet(...) 走 DDP forward 才能同步梯度)
     if args.dist:
-        ddpm = torch.nn.parallel.DistributedDataParallel(ddpm, device_ids=[rank])
+        ddp_unet = torch.nn.parallel.DistributedDataParallel(unet, device_ids=[rank])
+        raw_ddpm.unet = ddp_unet
+    ddpm = raw_ddpm
+    ddpm_mod = ddpm  # 自定义方法直接可用
 
     ds = LatentAudioDataset(args.jsonl, args.audio_meta, vae, device, cond_drop_p=args.cond_drop_p)
     if args.dist:
@@ -217,7 +220,7 @@ def main():
             B = latent.size(0)
             t = torch.randint(0, n_timesteps, (B,), device=device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
-                loss = ddpm.training_losses(latent, t, lv, audio)
+                loss = ddpm_mod.training_losses(latent, t, lv, audio)
             opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(ddpm.parameters(), 1.0)
@@ -228,13 +231,15 @@ def main():
         if rank == 0:
             msg = f"ep {ep}: loss {tot/max(1,n):.4f}, lr {sched.get_last_lr()[0]:.2e}, {time.time()-t0:.0f}s"
             print(msg, flush=True)
+            sd = ddpm.state_dict()
+            sd = {k.replace("unet.module.", "unet."): v for k, v in sd.items()}  # DDP 前缀清理
             torch.save({
-                "model": (ddpm.module if args.dist else ddpm).state_dict(),
+                "model": sd,
                 "epoch": ep, "args": vars(args),
                 "opt": opt.state_dict(), "sched": sched.state_dict(),
             }, last_path)
             if ep % 10 == 0 or ep == args.epochs - 1:
-                torch.save({"model": (ddpm.module if args.dist else ddpm).state_dict(), "epoch": ep},
+                torch.save({"model": sd, "epoch": ep},
                            os.path.join(args.out, f"ep{ep:03d}.ckpt"))
     if args.dist:
         dist.destroy_process_group()
