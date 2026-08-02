@@ -114,7 +114,7 @@ class Decoder(nn.Module):
 
 
 class AutoencoderKL(nn.Module):
-    def __init__(self, in_ch=9, middle=64, z_ch=16, ch_mult=(1, 2, 4, 4), kl_weight=1e-4,
+    def __init__(self, in_ch=10, middle=64, z_ch=16, ch_mult=(1, 2, 4, 4), kl_weight=1e-4,
                  use_checkpoint=False):
         super().__init__()
         self.encoder = Encoder(in_ch, middle, z_ch, ch_mult, use_checkpoint=use_checkpoint)
@@ -144,26 +144,26 @@ class AutoencoderKL(nn.Module):
 class ChartReconstructLoss(nn.Module):
     """通道加权重建损失。
     通道: 0 tap_mask, 1 tap_width, 2 drag_mask, 3 drag_width,
-          4 slide_path(0/1/2), 5 slide_width, 6 overlap, 7 beat, 8 bar
+          4 slide_mask(0/1), 5 slide_start(0/1), 6 slide_width,
+          7 overlap, 8 beat, 9 bar
     """
     CH_LOSS = {
         0: "bce", 1: "l1_masked", 2: "bce", 3: "l1_masked",
-        4: "slide_path", 5: "l1_masked", 6: "l1_masked",
-        7: "bce", 8: "bce",
+        4: "bce", 5: "bce", 6: "l1_masked",
+        7: "l1_masked", 8: "bce", 9: "bce",
     }
     CH_WEIGHT = {
         0: 2.0, 1: 1.0, 2: 2.0, 3: 1.0,
-        4: 3.0, 5: 1.0, 6: 0.5, 7: 0.2, 8: 0.2,
+        4: 3.0, 5: 3.0, 6: 1.0, 7: 0.5, 8: 0.2, 9: 0.2,
     }
 
-    def __init__(self, label_smoothing=0.001, weight_start=2.0, pos_weight=100.0):
+    def __init__(self, label_smoothing=0.001, pos_weight=100.0):
         super().__init__()
         self.label_smoothing = label_smoothing
-        self.weight_start = weight_start
         self.pos_weight = pos_weight
 
     def forward(self, pred_logits, target):
-        # pred_logits: (B, 9, H, W) 未过 sigmoid; target 0~1 (slide_path 0/1/2)
+        # pred_logits: (B, N_CH, H, W) 未过 sigmoid; target 0~1
         total = 0.0
         losses = {}
         p = torch.sigmoid(pred_logits)
@@ -181,11 +181,6 @@ class ChartReconstructLoss(nn.Module):
                 loss = (mask * (pt - t).abs()).sum() / n
                 # 零区域轻惩罚 (防止空洞输出)
                 loss = loss + 0.05 * ((1 - mask) * pt).mean()
-            elif ltype == "slide_path":
-                # 全图加权 MSE: 1/2 像素权重更高, 0 像素权重 1
-                wt = torch.where(t > 1.5, torch.full_like(t, 8.0 * self.weight_start),
-                                 torch.where(t > 0.5, torch.full_like(t, 4.0), torch.ones_like(t)))
-                loss = (wt * (pt - t).pow(2)).mean()
             total = total + w * loss
             losses[c] = float(loss.item())
         # 互斥: 同一像素 tap 与 drag 不应同时激活

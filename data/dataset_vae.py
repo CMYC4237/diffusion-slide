@@ -13,7 +13,7 @@ from convertor import chart_to_array
 FPS = 16
 WINDOW_FRAMES = 1024   # 64 拍窗口
 X_SIZE = 256
-N_CH = 9
+N_CH = 10
 
 
 class SlideWindowDataset(Dataset):

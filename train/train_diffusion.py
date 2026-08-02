@@ -88,7 +88,7 @@ class LatentAudioDataset(Dataset):
         if cache_key not in self._latent_cache:
             arr = chart_to_array(r["notes"], r["length_beat"], t_start=t_start, t_end=t_end).astype(np.float32)
             if arr.shape[1] < WINDOW_FRAMES:
-                pad = np.zeros((9, WINDOW_FRAMES - arr.shape[1], 256), np.float32)
+                pad = np.zeros((10, WINDOW_FRAMES - arr.shape[1], 256), np.float32)
                 arr = np.concatenate([arr, pad], 1)
             if arr.shape[1] > WINDOW_FRAMES:
                 arr = arr[:, :WINDOW_FRAMES, :]

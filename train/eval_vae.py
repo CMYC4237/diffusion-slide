@@ -59,7 +59,7 @@ def main():
         for k, (r, ts) in enumerate(picks):
             arr = chart_to_array(r["notes"], r["length_beat"], t_start=ts, t_end=ts + 64).astype(np.float32)
             if arr.shape[1] < 1024:
-                pad = np.zeros((9, 1024 - arr.shape[1], 256), np.float32)
+                pad = np.zeros((10, 1024 - arr.shape[1], 256), np.float32)
                 arr = np.concatenate([arr, pad], 1)
             x = torch.from_numpy(arr)[None].to(args.device)
             z = model.encode(x)[0]

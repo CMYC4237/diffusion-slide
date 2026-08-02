@@ -2,16 +2,17 @@
 """
 无轨谱面 (Slide, mode 7) <-> 多通道图像 convertor。
 
-通道布局 (9 通道, H x W = 时间帧 x 256px)：
+通道布局 (10 通道, H x W = 时间帧 x 256px)：
   0. tap_mask    : tap 点中心像素 = 1
   1. tap_width   : tap 的 w/256
   2. drag_mask   : drag 点中心像素 = 1
   3. drag_width  : drag 的 w/256
-  4. slide_path  : 滑条中心线 = 1, 起点像素 = 2, 无 = 0
-  5. slide_width : 滑条 w/256 (仅路径像素)
-  6. overlap_cnt : 滑条路径重叠计数 (归一化 /8, 0~1)
-  7. beat_line   : 每拍边界 = 1
-  8. bar_line    : 每 4 拍小节边界 = 1
+  4. slide_mask  : 滑条中心线 (含起点) = 1
+  5. slide_start : 滑条起点像素 = 1 (独立通道, 解决 sigmoid 无法表达值2的问题)
+  6. slide_width : 滑条 w/256 (仅路径像素)
+  7. overlap_cnt : 滑条路径重叠计数 (归一化 /8, 0~1)
+  8. beat_line   : 每拍边界 = 1
+  9. bar_line    : 每 4 拍小节边界 = 1
 
 坐标约定：
   - x 轴 = 横向位置, 1px = 1 坐标单位, 像素列 0..255 (x 中心线四舍五入)
@@ -25,6 +26,12 @@ X_SIZE = 256      # 像素宽度
 BEAT_PER_BAR = 4  # 每小节拍数
 W_MAX = 256.0     # w 归一化分母
 OVERLAP_NORM = 8.0  # 重叠计数归一化分母
+
+# 通道索引
+CH_TAP_MASK, CH_TAP_W, CH_DRAG_MASK, CH_DRAG_W = 0, 1, 2, 3
+CH_SLIDE_MASK, CH_SLIDE_START, CH_SLIDE_W, CH_OVERLAP = 4, 5, 6, 7
+CH_BEAT, CH_BAR = 8, 9
+N_CH = 10
 
 # ---------- 前向: 谱面 -> 通道数组 ----------
 
@@ -44,7 +51,7 @@ def chart_to_array(notes, length_beat, fps=FPS, x_size=X_SIZE, include_grid=True
         t_max = t_end
     H = int(np.ceil((t_max - t_start) * fps)) + 2
     f_off = int(round(t_start * fps))  # 全局帧 -> 本地帧 偏移
-    arr = np.zeros((9, H, x_size), dtype=np.float32)
+    arr = np.zeros((N_CH, H, x_size), dtype=np.float32)
     if include_grid:
         # 拍线 + 小节线 (仅窗口内)
         b0 = max(0, int(np.ceil(t_start)))
@@ -52,9 +59,9 @@ def chart_to_array(notes, length_beat, fps=FPS, x_size=X_SIZE, include_grid=True
             fg = int(round(b * fps))
             f = fg - f_off
             if 0 <= f < H:
-                arr[7, f, :] = 1.0
+                arr[CH_BEAT, f, :] = 1.0
                 if b % BEAT_PER_BAR == 0:
-                    arr[8, f, :] = 1.0
+                    arr[CH_BAR, f, :] = 1.0
 
     def put_frame(fg, x, mask_ch, w_ch, w):
         f = fg - f_off
@@ -67,9 +74,9 @@ def chart_to_array(notes, length_beat, fps=FPS, x_size=X_SIZE, include_grid=True
     for n in notes:
         t, x, w, typ = n["t"], n["x"], n["w"], n["type"]
         if typ == 0:  # tap
-            put_frame(int(round(t * fps)), x, 0, 1, w)
+            put_frame(int(round(t * fps)), x, CH_TAP_MASK, CH_TAP_W, w)
         elif typ == 1:  # drag
-            put_frame(int(round(t * fps)), x, 2, 3, w)
+            put_frame(int(round(t * fps)), x, CH_DRAG_MASK, CH_DRAG_W, w)
         elif typ == 2:  # slide
             seg = n.get("seg", [])
             pts = [(t, x)] + [(t + s["dt"], x + s["dx"]) for s in seg]
@@ -89,23 +96,23 @@ def chart_to_array(notes, length_beat, fps=FPS, x_size=X_SIZE, include_grid=True
                     xi = int(round(x0 + (x1 - x0) * a))
                     if 0 <= xi < x_size:
                         px.add((f, xi))
-            # 起点像素
+            # 起点像素 (mask + start)
             fs = int(round(t * fps)) - f_off
             xs = int(round(x))
             if 0 <= fs < H and 0 <= xs < x_size:
                 px.add((fs, xs))
-            # 写入 path/width 通道
+            # 写入 mask/width 通道
             for f, xi in px:
-                arr[4, f, xi] = 1.0
-                arr[5, f, xi] = w / W_MAX
-            # 起点 = 2
+                arr[CH_SLIDE_MASK, f, xi] = 1.0
+                arr[CH_SLIDE_W, f, xi] = w / W_MAX
+            # 起点通道
             if 0 <= fs < H and 0 <= xs < x_size:
-                arr[4, fs, xs] = 2.0
+                arr[CH_SLIDE_START, fs, xs] = 1.0
             slide_pixel_sets.append(px)
     # overlap 计数
     for px in slide_pixel_sets:
         for f, xi in px:
-            arr[6, f, xi] = min(arr[6, f, xi] + 1.0 / OVERLAP_NORM, 1.0)
+            arr[CH_OVERLAP, f, xi] = min(arr[CH_OVERLAP, f, xi] + 1.0 / OVERLAP_NORM, 1.0)
     return arr
 
 
@@ -134,12 +141,12 @@ def array_to_chart(arr, fps=FPS, x_size=X_SIZE):
         notes.append({"t": round(f / fps, 4), "x": int(x), "w": int(round(arr[3, f, x] * W_MAX)),
                       "type": 1})
 
-    # slide: 找起点 (path 值 > 1.5)
-    starts = arr[4] > 1.5
+    # slide: 起点从独立通道读 (CH_SLIDE_START)
+    starts = arr[CH_SLIDE_START] > th
     sy, sx = np.nonzero(starts)
     used = np.zeros((H, x_size), dtype=bool)
     # 预索引: 每帧的路径像素 x 列表
-    frame_px = [np.nonzero(arr[4, f, :] > th)[0] for f in range(H)]
+    frame_px = [np.nonzero(arr[CH_SLIDE_MASK, f, :] > th)[0] for f in range(H)]
 
     for f0, x0 in zip(sy, sx):
         if used[f0, x0]:
@@ -159,7 +166,7 @@ def array_to_chart(arr, fps=FPS, x_size=X_SIZE):
                     if not (not used[nf, nx] and abs(nx - x) <= 32):
                         continue
                     # 重叠区: 仅在当前像素非重叠时允许跨越
-                    if arr[6, f, x] < 1.5 / OVERLAP_NORM + 0.05 and arr[6, nf, nx] >= 1.5 / OVERLAP_NORM:
+                    if arr[CH_OVERLAP, f, x] < 1.5 / OVERLAP_NORM + 0.05 and arr[CH_OVERLAP, nf, nx] >= 1.5 / OVERLAP_NORM:
                         continue
                     pred = x + (x - prev_x)
                     score = (abs(nx - pred) * 2 + jump)
@@ -191,7 +198,7 @@ def array_to_chart(arr, fps=FPS, x_size=X_SIZE):
         if seg:
             notes.append({
                 "t": round(f0 / fps, 4), "x": int(x0),
-                "w": int(round(arr[5, f0, x0] * W_MAX)),
+                "w": int(round(arr[CH_SLIDE_W, f0, x0] * W_MAX)),
                 "type": 2, "seg": seg,
             })
     notes.sort(key=lambda n: (n["t"], n["x"]))
