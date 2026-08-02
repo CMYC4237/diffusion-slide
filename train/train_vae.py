@@ -71,9 +71,12 @@ def main():
     va_dl = DataLoader(va_dataset, batch_size=args.batch, sampler=va_sampler,
                        num_workers=0, pin_memory=True)
 
-    model = AutoencoderKL(use_checkpoint=not args.no_checkpoint).to(args.device)
+    raw_model = AutoencoderKL(use_checkpoint=not args.no_checkpoint).to(args.device)
+    kl_weight = raw_model.kl_weight
     if args.dist:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
+        model = torch.nn.parallel.DistributedDataParallel(raw_model, device_ids=[rank])
+    else:
+        model = raw_model
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.0)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     loss_fn = ChartReconstructLoss()
@@ -95,7 +98,7 @@ def main():
                 rec, z, mean, logvar = model(x)
                 rec_loss, _ = loss_fn(rec, x)
             kl = torch.mean(0.5 * (mean.pow(2) + logvar.exp() - 1 - logvar))
-            loss = rec_loss + model.kl_weight * kl
+            loss = rec_loss + kl_weight * kl
             opt.zero_grad()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -115,7 +118,7 @@ def main():
                     rec, z, mean, logvar = model(x)
                     rec_loss, _ = loss_fn(rec, x)
                 kl = torch.mean(0.5 * (mean.pow(2) + logvar.exp() - 1 - logvar))
-                loss = rec_loss + model.kl_weight * kl
+                loss = rec_loss + kl_weight * kl
                 va_loss += loss.item() * x.size(0)
                 va_n += x.size(0)
         print(f"ep {ep}: train {tr_loss/tr_n:.4f}, val {va_loss/va_n:.4f}, "
@@ -123,7 +126,7 @@ def main():
         if rank == 0 and va_loss / va_n < best_val:
             best_val = va_loss / va_n
             ckpt = {
-                "model": model.state_dict(),
+                "model": (model.module if args.dist else model).state_dict(),
                 "epoch": ep,
                 "val_loss": best_val,
                 "args": vars(args),
@@ -131,7 +134,7 @@ def main():
             torch.save(ckpt, os.path.join(args.out, "best.ckpt"))
             print(f"  -> saved best.ckpt (val {best_val:.4f})")
         if rank == 0:
-            torch.save({"model": model.state_dict(), "epoch": ep},
+            torch.save({"model": (model.module if args.dist else model).state_dict(), "epoch": ep},
                        os.path.join(args.out, "last.ckpt"))
     if args.dist:
         torch.distributed.destroy_process_group()

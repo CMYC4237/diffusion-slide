@@ -161,6 +161,7 @@ def main():
     # 扩散模型
     unet = UNet(with_audio=True, with_lv=True, use_checkpoint=True).to(device)
     ddpm = DDPM(unet).to(device)
+    n_timesteps = ddpm.timesteps
     opt = torch.optim.AdamW(ddpm.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     n_params = sum(p.numel() for p in ddpm.parameters())
@@ -192,7 +193,7 @@ def main():
             lv = batch["lv"].to(device)
             audio = batch["audio"].to(device)
             B = latent.size(0)
-            t = torch.randint(0, ddpm.timesteps, (B,), device=device)
+            t = torch.randint(0, n_timesteps, (B,), device=device)
             with torch.autocast("cuda", dtype=torch.bfloat16, enabled=args.amp):
                 loss = ddpm.training_losses(latent, t, lv, audio)
             opt.zero_grad()
@@ -205,10 +206,10 @@ def main():
         if rank == 0:
             msg = f"ep {ep}: loss {tot/max(1,n):.4f}, lr {sched.get_last_lr()[0]:.2e}, {time.time()-t0:.0f}s"
             print(msg, flush=True)
-            torch.save({"model": ddpm.state_dict(), "epoch": ep, "args": vars(args)},
+            torch.save({"model": (ddpm.module if args.dist else ddpm).state_dict(), "epoch": ep, "args": vars(args)},
                        os.path.join(args.out, "last.ckpt"))
             if ep % 5 == 0 or ep == args.epochs - 1:
-                torch.save({"model": ddpm.state_dict(), "epoch": ep},
+                torch.save({"model": (ddpm.module if args.dist else ddpm).state_dict(), "epoch": ep},
                            os.path.join(args.out, f"ep{ep:03d}.ckpt"))
     if args.dist:
         dist.destroy_process_group()
