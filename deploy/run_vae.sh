@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # VAE 正式训练: 2x4090 DDP
+# 显存实测 (4060, bf16+checkpoint): batch 8 = 7.5GB -> 4090 16GB 安全, 可 batch 12
 set -e
 cd "$(dirname "$0")/.."
 
