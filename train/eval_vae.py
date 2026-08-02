@@ -64,8 +64,10 @@ def main():
             x = torch.from_numpy(arr)[None].to(args.device)
             z = model.encode(x)[0]
             rec = torch.sigmoid(model.decode(z))[0].cpu().numpy()
-            # 反向还原谱面
+            # 反向还原谱面 (窗口本地坐标, 转回全局)
             notes = array_to_chart(rec)
+            for n in notes:
+                n["t"] = n["t"] + ts
 
             fig, axes = plt.subplots(1, 2, figsize=(16, 11))
             render_panel(axes[0], arr, f"原始 (song={r['song_id']} '{r['version']}')")
