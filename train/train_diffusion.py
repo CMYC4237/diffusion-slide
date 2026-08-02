@@ -43,6 +43,7 @@ class LatentAudioDataset(Dataset):
         self.cond_drop_p = cond_drop_p
         self.mirror_p = mirror_p
         self._mel_cache = {}
+        self._latent_cache = {}  # (谱面下标, 槽号) -> latent, 槽固定后可复用
         # 窗口槽: (谱面下标, 槽号)
         self.slots = []
         for i, r in enumerate(self.recs):
@@ -71,30 +72,35 @@ class LatentAudioDataset(Dataset):
     def __getitem__(self, idx):
         i, w = self.slots[idx]
         r = self.recs[i]
-        # 窗口起点 (槽 + 随机偏移)
+        # 窗口起点: 固定槽起点 (w*256), 保证 latent 可缓存
         t_max = r["length_beat"]
         for n in r["notes"]:
             if n.get("seg"):
                 t_max = max(t_max, n["t"] + n["seg"][-1]["dt"])
         h_full = int(np.ceil(t_max * FPS)) + 2
         max_start = max(0, h_full - WINDOW_FRAMES)
-        s = min(w * 256 + self.rng.randint(0, 256), max_start)
+        s = min(w * 256, max_start)
         t_start = s / FPS
         t_end = t_start + WINDOW_FRAMES / FPS
 
-        # 渲染窗口 -> VAE latent
-        arr = chart_to_array(r["notes"], r["length_beat"], t_start=t_start, t_end=t_end).astype(np.float32)
-        if arr.shape[1] < WINDOW_FRAMES:
-            pad = np.zeros((9, WINDOW_FRAMES - arr.shape[1], 256), np.float32)
-            arr = np.concatenate([arr, pad], 1)
-        if arr.shape[1] > WINDOW_FRAMES:
-            arr = arr[:, :WINDOW_FRAMES, :]
+        # latent 缓存 (槽固定 -> 可复用)
+        cache_key = (i, w)
+        if cache_key not in self._latent_cache:
+            arr = chart_to_array(r["notes"], r["length_beat"], t_start=t_start, t_end=t_end).astype(np.float32)
+            if arr.shape[1] < WINDOW_FRAMES:
+                pad = np.zeros((9, WINDOW_FRAMES - arr.shape[1], 256), np.float32)
+                arr = np.concatenate([arr, pad], 1)
+            if arr.shape[1] > WINDOW_FRAMES:
+                arr = arr[:, :WINDOW_FRAMES, :]
+            x = torch.from_numpy(arr)[None].to(self.device)
+            with torch.no_grad():
+                z = self.vae.encode(x)[0]  # (1, 16, 128, 32)
+            self._latent_cache[cache_key] = z[0].cpu().numpy()
+        latent = self._latent_cache[cache_key]
+
+        # 镜像增强 (latent 空间翻转)
         if self.rng.random() < self.mirror_p:
-            arr = np.flip(arr, axis=2).copy()
-        x = torch.from_numpy(arr)[None].to(self.device)
-        with torch.no_grad():
-            z = self.vae.encode(x)[0]  # (1, 16, 128, 32)
-        latent = z[0].cpu().numpy()
+            latent = np.flip(latent, axis=2)
 
         # 音频对齐特征
         mel = self._mel(r["song_id"])
