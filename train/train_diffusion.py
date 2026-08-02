@@ -43,6 +43,18 @@ class LatentAudioDataset(Dataset):
         self.cond_drop_p = cond_drop_p
         self.mirror_p = mirror_p
         self._mel_cache = {}
+        # 窗口槽: (谱面下标, 槽号)
+        self.slots = []
+        for i, r in enumerate(self.recs):
+            t_max = r["length_beat"]
+            for n in r["notes"]:
+                if n.get("seg"):
+                    t_max = max(t_max, n["t"] + n["seg"][-1]["dt"])
+            h_full = int(np.ceil(t_max * FPS)) + 2
+            max_start = max(0, h_full - WINDOW_FRAMES)
+            n_slots = max(1, max_start // 256 + 1)
+            for w in range(n_slots):
+                self.slots.append((i, w))
 
     def _mel(self, song_id):
         sid = str(song_id)
@@ -53,18 +65,20 @@ class LatentAudioDataset(Dataset):
         return self._mel_cache[sid]
 
     def __len__(self):
-        return len(self.recs)
+        # 每谱面多个窗口槽 (按 256 帧步进), 提高样本量
+        return len(self.slots)
 
     def __getitem__(self, idx):
-        r = self.recs[idx]
-        # 窗口起点 (随机)
+        i, w = self.slots[idx]
+        r = self.recs[i]
+        # 窗口起点 (槽 + 随机偏移)
         t_max = r["length_beat"]
         for n in r["notes"]:
             if n.get("seg"):
                 t_max = max(t_max, n["t"] + n["seg"][-1]["dt"])
         h_full = int(np.ceil(t_max * FPS)) + 2
         max_start = max(0, h_full - WINDOW_FRAMES)
-        s = self.rng.randint(0, max_start)
+        s = min(w * 256 + self.rng.randint(0, 256), max_start)
         t_start = s / FPS
         t_end = t_start + WINDOW_FRAMES / FPS
 

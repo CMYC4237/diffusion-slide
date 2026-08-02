@@ -58,16 +58,17 @@ def main():
     # 简单切分: 按窗口起点索引
     train_idxs = list(range(n_train))
     val_idxs = list(range(n_train, n))
-    k = min(args.samples_per_epoch, len(train_idxs))
+    tr_dataset = torch.utils.data.Subset(train, train_idxs)
+    va_dataset = torch.utils.data.Subset(val, val_idxs)
     if args.dist:
-        tr_sampler = torch.utils.data.distributed.DistributedSampler(
-            train_idxs, num_replicas=world, rank=rank, shuffle=True, num_samples=k, drop_last=True)
+        tr_sampler = torch.utils.data.distributed.DistributedSampler(tr_dataset, shuffle=True, drop_last=True)
     else:
-        tr_sampler = torch.utils.data.RandomSampler(train_idxs, num_samples=k, replacement=False)
-    tr_dl = DataLoader(train, batch_size=args.batch, sampler=tr_sampler,
+        tr_sampler = torch.utils.data.RandomSampler(
+            tr_dataset, num_samples=min(args.samples_per_epoch, len(tr_dataset)), replacement=False)
+    tr_dl = DataLoader(tr_dataset, batch_size=args.batch, sampler=tr_sampler,
                        num_workers=args.workers, drop_last=True, pin_memory=True)
-    va_dl = DataLoader(val, batch_size=args.batch,
-                       sampler=torch.utils.data.SequentialSampler(val_idxs[:max(1, len(val_idxs)//world)] if args.dist else val_idxs),
+    va_sampler = torch.utils.data.SequentialSampler(va_dataset)
+    va_dl = DataLoader(va_dataset, batch_size=args.batch, sampler=va_sampler,
                        num_workers=0, pin_memory=True)
 
     model = AutoencoderKL(use_checkpoint=not args.no_checkpoint).to(args.device)
@@ -78,7 +79,7 @@ def main():
     loss_fn = ChartReconstructLoss()
     n_params = sum(p.numel() for p in model.parameters())
     amp_dtype = torch.bfloat16 if args.amp else torch.float32
-    print(f"[rank{rank}] train样本 {k}, val {len(val_idxs)}, 参数 {n_params/1e6:.2f}M, device {args.device}, amp={args.amp}, checkpoint={not args.no_checkpoint}", flush=True)
+    print(f"[rank{rank}] train样本 {len(tr_dataset)}, val {len(va_dataset)}, 参数 {n_params/1e6:.2f}M, device {args.device}, amp={args.amp}, checkpoint={not args.no_checkpoint}", flush=True)
 
     best_val = 1e9
     for ep in range(args.epochs):
