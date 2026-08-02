@@ -188,6 +188,10 @@ class ChartReconstructLoss(nn.Module):
                 loss = (wt * (pt - t).pow(2)).mean()
             total = total + w * loss
             losses[c] = float(loss.item())
+        # 互斥: 同一像素 tap 与 drag 不应同时激活
+        mutual = (p[:, 0] * p[:, 2]).mean()
+        total = total + 1.0 * mutual
+        losses["mutual"] = float(mutual.item())
         return total, losses
 
 

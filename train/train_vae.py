@@ -34,10 +34,20 @@ def main():
     ap.add_argument("--cache", action="store_true", default=False)
     ap.add_argument("--samples_per_epoch", type=int, default=1500)
     ap.add_argument("--split", type=float, default=0.9)
+    ap.add_argument("--dist", action="store_true", default=False)
     args = ap.parse_args()
 
     torch.manual_seed(0)
     os.makedirs(args.out, exist_ok=True)
+
+    if args.dist:
+        torch.distributed.init_process_group("nccl")
+        rank = torch.distributed.get_rank()
+        world = torch.distributed.get_world_size()
+        args.device = f"cuda:{rank}"
+        torch.cuda.set_device(rank)
+    else:
+        rank, world = 0, 1
 
     full = SlideWindowDataset(args.data, window_frames=args.window, cache_in_mem=args.cache)
     n = len(full)
@@ -49,22 +59,31 @@ def main():
     train_idxs = list(range(n_train))
     val_idxs = list(range(n_train, n))
     k = min(args.samples_per_epoch, len(train_idxs))
-    tr_dl = DataLoader(train, batch_size=args.batch,
-                       sampler=torch.utils.data.RandomSampler(train_idxs, num_samples=k, replacement=False),
+    if args.dist:
+        tr_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_idxs, num_replicas=world, rank=rank, shuffle=True, num_samples=k, drop_last=True)
+    else:
+        tr_sampler = torch.utils.data.RandomSampler(train_idxs, num_samples=k, replacement=False)
+    tr_dl = DataLoader(train, batch_size=args.batch, sampler=tr_sampler,
                        num_workers=args.workers, drop_last=True, pin_memory=True)
-    va_dl = DataLoader(val, batch_size=args.batch, sampler=torch.utils.data.SequentialSampler(val_idxs),
+    va_dl = DataLoader(val, batch_size=args.batch,
+                       sampler=torch.utils.data.SequentialSampler(val_idxs[:max(1, len(val_idxs)//world)] if args.dist else val_idxs),
                        num_workers=0, pin_memory=True)
 
     model = AutoencoderKL(use_checkpoint=not args.no_checkpoint).to(args.device)
+    if args.dist:
+        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[rank])
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.0)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     loss_fn = ChartReconstructLoss()
     n_params = sum(p.numel() for p in model.parameters())
     amp_dtype = torch.bfloat16 if args.amp else torch.float32
-    print(f"train样本 {len(train_idxs)}, val {len(val_idxs)}, 参数 {n_params/1e6:.2f}M, device {args.device}, amp={args.amp}, checkpoint={not args.no_checkpoint}")
+    print(f"[rank{rank}] train样本 {k}, val {len(val_idxs)}, 参数 {n_params/1e6:.2f}M, device {args.device}, amp={args.amp}, checkpoint={not args.no_checkpoint}", flush=True)
 
     best_val = 1e9
     for ep in range(args.epochs):
+        if args.dist:
+            tr_sampler.set_epoch(ep)
         model.train()
         t0 = time.time()
         tr_loss = 0.0
@@ -99,8 +118,8 @@ def main():
                 va_loss += loss.item() * x.size(0)
                 va_n += x.size(0)
         print(f"ep {ep}: train {tr_loss/tr_n:.4f}, val {va_loss/va_n:.4f}, "
-              f"lr {sched.get_last_lr()[0]:.2e}, {time.time()-t0:.0f}s")
-        if va_loss / va_n < best_val:
+              f"lr {sched.get_last_lr()[0]:.2e}, {time.time()-t0:.0f}s", flush=True)
+        if rank == 0 and va_loss / va_n < best_val:
             best_val = va_loss / va_n
             ckpt = {
                 "model": model.state_dict(),
@@ -110,8 +129,11 @@ def main():
             }
             torch.save(ckpt, os.path.join(args.out, "best.ckpt"))
             print(f"  -> saved best.ckpt (val {best_val:.4f})")
-        torch.save({"model": model.state_dict(), "epoch": ep},
-                   os.path.join(args.out, "last.ckpt"))
+        if rank == 0:
+            torch.save({"model": model.state_dict(), "epoch": ep},
+                       os.path.join(args.out, "last.ckpt"))
+    if args.dist:
+        torch.distributed.destroy_process_group()
 
 
 if __name__ == "__main__":
