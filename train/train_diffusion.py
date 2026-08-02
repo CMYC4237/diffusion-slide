@@ -135,7 +135,7 @@ def main():
     ap.add_argument("--epochs", type=int, default=50)
     ap.add_argument("--batch", type=int, default=2)
     ap.add_argument("--lr", type=float, default=1e-4)
-    ap.add_argument("--vae_ckpt", default="checkpoints/vae_smoke/best.ckpt")
+    ap.add_argument("--vae_ckpt", default="checkpoints/vae/best.ckpt")
     ap.add_argument("--jsonl", default="data/dataset/slide_clean.jsonl")
     ap.add_argument("--audio_meta", default="data/audio/meta.json")
     ap.add_argument("--out", default="checkpoints/diffusion")
@@ -143,6 +143,7 @@ def main():
     ap.add_argument("--dist", action="store_true", default=False)
     ap.add_argument("--amp", action="store_true", default=True)
     ap.add_argument("--cond_drop_p", type=float, default=0.1)
+    ap.add_argument("--resume", action="store_true", default=False)
     args = ap.parse_args()
 
     torch.manual_seed(0)
@@ -166,12 +167,27 @@ def main():
 
     # 扩散模型
     unet = UNet(with_audio=True, with_lv=True, use_checkpoint=True).to(device)
-    ddpm = DDPM(unet).to(device)
-    n_timesteps = ddpm.timesteps
-    opt = torch.optim.AdamW(ddpm.parameters(), lr=args.lr)
+    raw_ddpm = DDPM(unet).to(device)
+    n_timesteps = raw_ddpm.timesteps
+    opt = torch.optim.AdamW(raw_ddpm.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
-    n_params = sum(p.numel() for p in ddpm.parameters())
+    n_params = sum(p.numel() for p in raw_ddpm.parameters())
 
+    # 断点续训: 从 last.ckpt 恢复 model/optimizer/scheduler/epoch
+    start_ep = 0
+    last_path = os.path.join(args.out, "last.ckpt")
+    if args.resume and os.path.exists(last_path):
+        ck = torch.load(last_path, map_location=device)
+        raw_ddpm.load_state_dict(ck["model"])
+        if "opt" in ck:
+            opt.load_state_dict(ck["opt"])
+        if "sched" in ck:
+            sched.load_state_dict(ck["sched"])
+        start_ep = ck.get("epoch", -1) + 1
+        if rank == 0:
+            print(f"[resume] 从 epoch {start_ep} 继续 (ckpt={last_path})", flush=True)
+
+    ddpm = raw_ddpm
     if args.dist:
         ddpm = torch.nn.parallel.DistributedDataParallel(ddpm, device_ids=[rank])
 
@@ -187,7 +203,7 @@ def main():
     if rank == 0:
         print(f"扩散模型参数 {n_params/1e6:.2f}M, device {device}, dist={args.dist}")
 
-    for ep in range(args.epochs):
+    for ep in range(start_ep, args.epochs):
         if args.dist:
             sampler.set_epoch(ep)
         ddpm.train()
@@ -212,9 +228,12 @@ def main():
         if rank == 0:
             msg = f"ep {ep}: loss {tot/max(1,n):.4f}, lr {sched.get_last_lr()[0]:.2e}, {time.time()-t0:.0f}s"
             print(msg, flush=True)
-            torch.save({"model": (ddpm.module if args.dist else ddpm).state_dict(), "epoch": ep, "args": vars(args)},
-                       os.path.join(args.out, "last.ckpt"))
-            if ep % 5 == 0 or ep == args.epochs - 1:
+            torch.save({
+                "model": (ddpm.module if args.dist else ddpm).state_dict(),
+                "epoch": ep, "args": vars(args),
+                "opt": opt.state_dict(), "sched": sched.state_dict(),
+            }, last_path)
+            if ep % 10 == 0 or ep == args.epochs - 1:
                 torch.save({"model": (ddpm.module if args.dist else ddpm).state_dict(), "epoch": ep},
                            os.path.join(args.out, f"ep{ep:03d}.ckpt"))
     if args.dist:
