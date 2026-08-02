@@ -100,7 +100,7 @@ class LatentAudioDataset(Dataset):
 
         # 镜像增强 (latent 空间翻转)
         if self.rng.random() < self.mirror_p:
-            latent = np.flip(latent, axis=2)
+            latent = np.flip(latent, axis=2).copy()
 
         # 音频对齐特征
         mel = self._mel(r["song_id"])
