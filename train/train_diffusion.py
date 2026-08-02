@@ -213,7 +213,7 @@ def main():
         t0 = time.time()
         tot = 0.0
         n = 0
-        for batch in dl:
+        for step, batch in enumerate(dl):
             latent = batch["latent"].to(device)
             lv = batch["lv"].to(device)
             audio = batch["audio"].to(device)
@@ -227,6 +227,19 @@ def main():
             opt.step()
             tot += loss.item() * B
             n += B
+            # 进度条 (rank0, 每 epoch 约 20 行)
+            if rank == 0 and args.epochs > 1:
+                total = max(1, len(dl))
+                log_every = max(1, total // 20)
+                if step % log_every == 0 or step == total - 1:
+                    elapsed = time.time() - t0
+                    avg = tot / max(1, n)
+                    eta = elapsed / (step + 1) * (total - step - 1)
+                    pct = 100.0 * (step + 1) / total
+                    print(f"\r  [ep {ep}/{args.epochs}] {pct:5.1f}% ({step+1}/{total}) "
+                          f"loss {avg:.4f} ETA {eta/60:4.1f}min", end="", flush=True)
+        if rank == 0 and args.epochs > 1:
+            print("", flush=True)
         sched.step()
         if rank == 0:
             msg = f"ep {ep}: loss {tot/max(1,n):.4f}, lr {sched.get_last_lr()[0]:.2e}, {time.time()-t0:.0f}s"
