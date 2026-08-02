@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""AutoencoderKL: 谱面图像 (9, H, 256) -> latent (16, H/8, 32) -> 重建。"""
+"""AutoencoderKL: 谱面图像 (10, H, 256) -> latent (16, H/8, 32) -> 重建。"""
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

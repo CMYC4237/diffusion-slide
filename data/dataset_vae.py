@@ -17,7 +17,7 @@ N_CH = 10
 
 
 class SlideWindowDataset(Dataset):
-    """每个样本 = 一个随机窗口的谱面渲染 (9, WINDOW_FRAMES, 256)。"""
+    """每个样本 = 一个随机窗口的谱面渲染 (10, WINDOW_FRAMES, 256)。"""
 
     def __init__(self, jsonl_path, window_frames=WINDOW_FRAMES, mirror_p=0.5,
                  seed=0, cache_in_mem=True):

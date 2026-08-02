@@ -48,8 +48,9 @@ def main():
         img[..., 0] += arr[2] * 0.9
         img[..., 1] += arr[4] * 0.9
         img[..., 2] += arr[0] * 0.9
-        img += 0.05 * arr[7][..., None]
-        start = arr[4] > 1.5
+        img += 0.05 * arr[8][..., None]
+        from convertor import CH_SLIDE_START as _CSS
+        start = arr[_CSS] > 0.5
         img[start] = [1.0, 1.0, 0.2]
         ax.imshow(img, aspect="auto", origin="upper")
         ax.set_title(title, fontsize=10)
