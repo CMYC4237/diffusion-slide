@@ -19,9 +19,9 @@
 |---|---|
 | 0/1 | tap mask / tap width |
 | 2/3 | drag mask / drag width |
-| 4/5 | slide 中心线 (起点=2, 路径=1) / slide width |
-| 6 | 滑条重叠计数 (归一化) |
-| 7/8 | 拍线 / 小节线 |
+| 4/5 | slide 中心线 / slide 起点 (独立通道) |
+| 6/7 | slide width / 滑条重叠计数 (归一化) |
+| 8/9 | 拍线 / 小节线 |
 
 帧率 16 帧/拍；滑条渲染为 1px 中心线（非填充带），保证并排/交叉滑条结构可分离。
 
@@ -52,8 +52,15 @@ python data/extract_audio.py
 # 3. 训练 VAE (本地 4060 建议 batch 2 + amp; 集群 4090 可 batch 8)
 python train/train_vae.py --epochs 20 --batch 2
 
-# 4. 评估
+# 4. 评估 (VAE 重建质量)
 python train/eval_vae.py --ckpt checkpoints/vae/best.ckpt
+python train/eval_vae_detail.py --ckpt checkpoints/vae/best.ckpt
+
+# 5. 生成谱面 (.mcz 含音频, Malody 可直接导入)
+python train/generate.py --diff_ckpt checkpoints/diffusion/last.ckpt     --vae_ckpt checkpoints/vae/best.ckpt --song 10072 --lv 12 --cfg 1.5
+
+# 批量生成 + 按真实 lv 密度/类型分布自动选优 (推荐)
+python train/generate_best.py --song 10072 --lv 12 --tries 12 --cfg 1.5
 ```
 
 ## 当前进度
@@ -62,5 +69,7 @@ python train/eval_vae.py --ckpt checkpoints/vae/best.ckpt
 - [x] 谱面 <-> 图像 convertor（前向无损, 反向重建 slide 99.1%）
 - [x] 音频特征管线 (248 首 mel 缓存)
 - [x] 第一阶 VAE 训练管线（smoke test 通过: 简单谱面重建 100%, 高难 88.6%）
-- [ ] 扩散模型（难度 + 音频条件）
-- [ ] 生成 → 谱面 JSON 回写
+- [x] 扩散模型（难度 + 音频条件, MSE + latent 归一化 + CFG）
+- [x] 生成 → .mcz (含音频) 回写, 批量选优 (按 lv 密度/类型分布)
+- [x] 数据增强: 镜像 / 时间缩放(bpm×0.9~1.1) / 频带 mask / 变调 / 条件丢弃
+- [ ] 生成质量迭代: 条件控制 (密度条件 / 更强音频注入) 待优化
