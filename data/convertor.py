@@ -141,9 +141,17 @@ def array_to_chart(arr, fps=FPS, x_size=X_SIZE):
         notes.append({"t": round(f / fps, 4), "x": int(x), "w": int(round(arr[3, f, x] * W_MAX)),
                       "type": 1})
 
-    # slide: 起点从独立通道读 (CH_SLIDE_START)
-    starts = arr[CH_SLIDE_START] > th
-    sy, sx = np.nonzero(starts)
+    # slide: 起点 = 独立起点通道 ∪ 路径段首 (前一帧无邻接路径的像素, 兼容生成谱面起点缺失)
+    starts_mask = arr[CH_SLIDE_START] > th
+    path_binary = arr[CH_SLIDE_MASK] > th
+    for f in range(1, H):
+        prev = path_binary[f - 1]
+        cur_xs = np.nonzero(path_binary[f])[0]
+        for x in cur_xs:
+            lo, hi = max(0, x - 2), min(x_size, x + 3)
+            if not np.any(prev[lo:hi]):
+                starts_mask[f, x] = True
+    sy, sx = np.nonzero(starts_mask)
     used = np.zeros((H, x_size), dtype=bool)
     # 预索引: 每帧的路径像素 x 列表
     frame_px = [np.nonzero(arr[CH_SLIDE_MASK, f, :] > th)[0] for f in range(H)]

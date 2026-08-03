@@ -20,6 +20,7 @@ from vae import AutoencoderKL
 from diffusion import UNet, DDPM
 from convertor import array_to_chart, FPS, W_MAX
 from audio_align import align_mel
+LATENT_SCALE = 0.632
 
 
 def t_to_beat(t, denom=16):
@@ -112,6 +113,7 @@ def main():
                             steps=args.steps, cfg_scale=args.cfg, device=args.device)
             latents.append(z)
     z = torch.cat(latents, dim=2)
+    z = z * LATENT_SCALE  # latent 归一化还原
 
     # 解码 -> 通道图 -> 谱面
     with torch.no_grad():

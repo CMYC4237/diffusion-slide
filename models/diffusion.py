@@ -219,15 +219,23 @@ class DDPM(nn.Module):
             target = noise
         else:
             target = x0
-        return F.smooth_l1_loss(pred, target, reduction="mean")
+        return F.mse_loss(pred, target, reduction="mean")
 
     @torch.no_grad()
     def sample(self, shape, lv=None, audio_ctx=None, steps=250, eta=0.0,
                cfg_scale=0.0, lv_null=None, audio_null=None, device="cuda"):
-        """DDIM 采样 (steps < timesteps), 支持 classifier-free guidance"""
+        """DDIM 采样 (steps < timesteps), 支持 classifier-free guidance。
+        null 条件默认与训练一致: lv=0 + audio 全零 (而非 None)。
+        """
         self.eval()
         x = torch.randn(shape, device=device)
         ts = torch.linspace(self.timesteps - 1, 0, steps, dtype=torch.long, device=device)
+        # 与训练 CFG drop 一致的 null 条件 (lv=0, audio 全零)
+        if cfg_scale > 0:
+            if lv_null is None:
+                lv_null = torch.zeros(shape[0], dtype=torch.long, device=device)
+            if audio_null is None:
+                audio_null = torch.zeros_like(audio_ctx) if audio_ctx is not None else None
         for i, t in enumerate(ts):
             t_b = t.expand(shape[0])
             pred = self.unet(x, t_b, lv, audio_ctx)

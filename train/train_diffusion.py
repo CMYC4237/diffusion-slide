@@ -28,6 +28,7 @@ WINDOW_FRAMES = 1024
 LATENT_ROWS = WINDOW_FRAMES // 8          # 128
 LATENT_COLS = 32                          # 256 / 8
 LATENT_CH = 16
+LATENT_SCALE = 0.632  # 训练时 latent 归一化 (VAE 输出全局 std)
 
 
 class LatentAudioDataset(Dataset):
@@ -95,7 +96,7 @@ class LatentAudioDataset(Dataset):
             x = torch.from_numpy(arr)[None].to(self.device)
             with torch.no_grad():
                 z = self.vae.encode(x)[0]  # (1, 16, 128, 32)
-            self._latent_cache[cache_key] = z[0].cpu().numpy()
+            self._latent_cache[cache_key] = (z[0] / LATENT_SCALE).cpu().numpy()
         latent = self._latent_cache[cache_key]
 
         # 镜像增强 (latent 空间翻转)
