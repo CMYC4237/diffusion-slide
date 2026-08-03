@@ -89,7 +89,7 @@ def main():
             z = ddpm.sample((1, 16, gen_rows, 32), lv=lv_t, audio_ctx=ctx,
                             steps=args.steps, cfg_scale=args.cfg, device=args.device)
             z = z[:, :, crop:crop + args.rows, :]
-            z = z * torch.tensor([0.2732, 0.7144, 0.3273, 0.2301, 0.2052, 0.2667, 0.2719, 0.3148, 0.2903, 0.4250, 0.6842, 0.3241, 0.4672, 0.5662, 0.2370, 0.4088], device=z.device).view(1, 16, 1, 1)
+            z = z * torch.tensor([0.2732, 0.7144, 0.3273, 0.2301, 0.2052, 0.2667, 0.2719, 0.3148, 0.2903, 0.4250, 0.6842, 0.3241, 0.4672, 0.5662, 0.2370, 0.4088], device=z.device).view(16, 1, 1)
             rec = torch.sigmoid(vae.decode(z))[0].cpu().numpy()
         notes = array_to_chart(rec)
         for n in notes:

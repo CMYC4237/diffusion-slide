@@ -47,7 +47,7 @@ class LatentAudioDataset(Dataset):
         self.mirror_p = mirror_p
         self._mel_cache = {}
         self._latent_cache = {}  # (谱面下标, 槽号) -> latent, 槽固定后可复用
-        self.latent_scale = torch.tensor(LATENT_SCALE, dtype=torch.float32, device=device).view(1, 16, 1, 1)
+        self.latent_scale = torch.tensor(LATENT_SCALE, dtype=torch.float32, device=device).view(16, 1, 1)
         # 窗口槽: (谱面下标, 槽号)
         self.slots = []
         for i, r in enumerate(self.recs):

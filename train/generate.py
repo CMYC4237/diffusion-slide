@@ -133,7 +133,7 @@ def main():
     # 裁中间: 去掉开头/结尾各 1/8 (头尾边界伪影)
     crop = (gen_rows - rows) // 2
     z = z[:, :, crop:crop + rows, :]
-    z = z * torch.tensor(LATENT_SCALE, device=z.device).view(1, 16, 1, 1)  # per-channel 还原
+    z = z * torch.tensor(LATENT_SCALE, device=z.device).view(16, 1, 1)  # per-channel 还原
 
     # 解码 -> 通道图 -> 谱面
     with torch.no_grad():
