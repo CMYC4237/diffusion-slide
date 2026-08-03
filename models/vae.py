@@ -58,7 +58,7 @@ class Upsample(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, in_ch=9, middle=64, z_ch=16, ch_mult=(1, 2, 4, 4), num_res_blocks=1,
+    def __init__(self, in_ch=10, middle=64, z_ch=16, ch_mult=(1, 2, 4, 4), num_res_blocks=1,
                  use_checkpoint=False):
         super().__init__()
         self.conv_in = nn.Conv2d(in_ch, middle, 3, padding=1)
@@ -87,7 +87,7 @@ class Encoder(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, out_ch=9, middle=64, z_ch=16, ch_mult=(1, 2, 4, 4), num_res_blocks=1,
+    def __init__(self, out_ch=10, middle=64, z_ch=16, ch_mult=(1, 2, 4, 4), num_res_blocks=1,
                  use_checkpoint=False):
         super().__init__()
         chs = [middle * m for m in ch_mult]
