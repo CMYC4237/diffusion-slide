@@ -145,6 +145,8 @@ def main():
     ap.add_argument("--amp", action="store_true", default=True)
     ap.add_argument("--cond_drop_p", type=float, default=0.1)
     ap.add_argument("--resume", action="store_true", default=False)
+    ap.add_argument("--warm-start", action="store_true", default=False,
+                    help="加载旧权重继续训练(不恢复 opt/sched/epoch, 用于损失/归一化变更后的热启动)")
     args = ap.parse_args()
 
     torch.manual_seed(0)
@@ -174,19 +176,21 @@ def main():
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.epochs)
     n_params = sum(p.numel() for p in raw_ddpm.parameters())
 
-    # 断点续训: 从 last.ckpt 恢复 model/optimizer/scheduler/epoch
+    # 断点续训/热启动: 从 last.ckpt 恢复
     start_ep = 0
     last_path = os.path.join(args.out, "last.ckpt")
-    if args.resume and os.path.exists(last_path):
+    if os.path.exists(last_path) and (args.resume or args.warm_start):
         ck = torch.load(last_path, map_location=device)
         raw_ddpm.load_state_dict(ck["model"])
-        if "opt" in ck:
-            opt.load_state_dict(ck["opt"])
-        if "sched" in ck:
-            sched.load_state_dict(ck["sched"])
-        start_ep = ck.get("epoch", -1) + 1
-        if rank == 0:
-            print(f"[resume] 从 epoch {start_ep} 继续 (ckpt={last_path})", flush=True)
+        if args.resume:
+            if "opt" in ck:
+                opt.load_state_dict(ck["opt"])
+            if "sched" in ck:
+                sched.load_state_dict(ck["sched"])
+            start_ep = ck.get("epoch", -1) + 1
+            print(f"[resume] 从 epoch {start_ep} 继续", flush=True)
+        elif args.warm_start:
+            print(f"[warm-start] 加载权重从 epoch 0 重新训练 (新损失/归一化)", flush=True)
 
     # DDP: 包装实际被调用的 UNet 层 (training_losses 内部 self.unet(...) 走 DDP forward 才能同步梯度)
     if args.dist:

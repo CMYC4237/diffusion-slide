@@ -18,6 +18,9 @@ RESUME_FLAG=""
 if [ "${RESUME:-0}" = "1" ]; then
     RESUME_FLAG="--resume"
     echo "断点续训模式: 从 checkpoints/diffusion/last.ckpt 继续"
+elif [ "${WARM_START:-0}" = "1" ]; then
+    RESUME_FLAG="--warm-start"
+    echo "热启动模式: 加载旧权重从 epoch 0 重训 (新损失/归一化)"
 fi
 
 torchrun --nproc_per_node=2 --master_port=29501 \
