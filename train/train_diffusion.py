@@ -113,6 +113,16 @@ class LatentAudioDataset(Dataset):
             ctx = ctx[start_row:start_row + LATENT_ROWS]
             if ctx.shape[0] < LATENT_ROWS:
                 ctx = np.pad(ctx, ((0, LATENT_ROWS - ctx.shape[0]), (0, 0)))
+            # 音频增强: 频带 mask (随机抹 1-2 个连续频带, 模拟信息缺失)
+            if self.rng.random() < 0.3:
+                n_bins = ctx.shape[1]
+                w = self.rng.randint(4, 12)
+                b0 = self.rng.randint(0, max(1, n_bins - w))
+                ctx[:, b0:b0 + w] = -80.0
+            # 音频增强: 变调 (mel 频带轴平移 ±1, 模拟音高变化)
+            if self.rng.random() < 0.3:
+                shift = self.rng.choice([-1, 1])
+                ctx = np.roll(ctx, shift, axis=1)
         else:
             ctx = np.zeros((LATENT_ROWS, 128), dtype=np.float32)
 

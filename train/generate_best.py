@@ -76,16 +76,19 @@ def main():
     ddpm.load_state_dict(torch.load(args.diff_ckpt, map_location=args.device)["model"])
     ddpm.eval()
 
-    ctx = torch.from_numpy(align_mel(mel, bpms, n_rows=args.rows + 4, latent_rows_per_beat=0.5)[:args.rows])[None].to(args.device)
+    ctx = torch.from_numpy(align_mel(mel, bpms, n_rows=args.rows + args.rows // 4 + 4, latent_rows_per_beat=0.5)[:args.rows + args.rows // 4])[None].to(args.device)
     lv_t = torch.tensor([args.lv], device=args.device)
 
+    gen_rows = args.rows + args.rows // 4
+    crop = (gen_rows - args.rows) // 2
     best = None
-    print(f"批量生成 {args.tries} 张 (song={args.song} lv={args.lv} cfg={args.cfg} 目标密度={LV_DENSITY.get(args.lv, '?')} note/拍):")
+    print(f"批量生成 {args.tries} 张 (song={args.song} lv={args.lv} cfg={args.cfg} 目标密度={LV_DENSITY.get(args.lv, '?')} note/拍, 生成{gen_rows}行裁{crop}行):")
     for seed in range(args.tries):
         torch.manual_seed(seed)
         with torch.no_grad():
-            z = ddpm.sample((1, 16, args.rows, 32), lv=lv_t, audio_ctx=ctx,
+            z = ddpm.sample((1, 16, gen_rows, 32), lv=lv_t, audio_ctx=ctx,
                             steps=args.steps, cfg_scale=args.cfg, device=args.device)
+            z = z[:, :, crop:crop + args.rows, :]
             z = z * 0.632
             rec = torch.sigmoid(vae.decode(z))[0].cpu().numpy()
         notes = array_to_chart(rec)

@@ -114,8 +114,9 @@ def main():
 
     # 条件
     rows = args.rows
-    ctx = align_mel(mel, bpms, n_rows=rows + 4, latent_rows_per_beat=0.5)
-    ctx = ctx[:rows]
+    gen_rows = args.rows + args.rows // 4  # 生成更大窗口 (多 25%), 裁中间去边缘伪影
+    ctx = align_mel(mel, bpms, n_rows=gen_rows + 4, latent_rows_per_beat=0.5)
+    ctx = ctx[:gen_rows]
     ctx = torch.from_numpy(ctx)[None].to(args.device)
     lv = torch.tensor([args.lv], device=args.device)
 
@@ -124,10 +125,13 @@ def main():
     latents = []
     with torch.no_grad():
         for c in range(n_chunks):
-            z = ddpm.sample((1, 16, rows, 32), lv=lv, audio_ctx=ctx,
+            z = ddpm.sample((1, 16, gen_rows, 32), lv=lv, audio_ctx=ctx,
                             steps=args.steps, cfg_scale=args.cfg, device=args.device)
             latents.append(z)
     z = torch.cat(latents, dim=2)
+    # 裁中间: 去掉开头/结尾各 1/8 (头尾边界伪影)
+    crop = (gen_rows - rows) // 2
+    z = z[:, :, crop:crop + rows, :]
     z = z * LATENT_SCALE  # latent 归一化还原
 
     # 解码 -> 通道图 -> 谱面
