@@ -48,7 +48,12 @@ def to_malody_notes(notes):
     return out
 
 
-def make_mc(chart_notes, song_id, title="AI", artist="AI", version="AI Diff", bpm=120.0, bpms=None):
+def make_mc(chart_notes, song_id, title="AI", artist="AI", version="AI Diff", bpm=120.0, bpms=None,
+            audio_name=None):
+    """生成 Malody mode7 .mc 内容。audio_name 非空时附加 sound 引用 note (与真实谱面一致)。"""
+    notes = list(chart_notes)
+    if audio_name:
+        notes = notes + [{"beat": [0, 0, 1], "sound": audio_name, "vol": 100, "offset": 0, "type": 1}]
     return {
         "meta": {
             "$ver": 0, "creator": "DiffusionSlide-AI", "background": "",
@@ -58,9 +63,19 @@ def make_mc(chart_notes, song_id, title="AI", artist="AI", version="AI Diff", bp
         },
         "time": [{"beat": [0, 0, 1], "bpm": bpm}],
         "effect": [],
-        "note": chart_notes,
+        "note": notes,
         "extra": {"test": {"divide": 4, "speed": 100, "save": 0, "lock": 0, "edit_mode": 0}},
     }
+
+
+def save_mcz(mc_dict, audio_path, out_path):
+    """打包 Malody .mcz (zip): 0/chart.mc + 0/audio.<ext>"""
+    import zipfile
+    audio_name = os.path.basename(audio_path)
+    with zipfile.ZipFile(out_path, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("0/chart.mc", json.dumps(mc_dict, ensure_ascii=False, indent=1))
+        z.write(audio_path, f"0/{audio_name}")
+    return out_path
 
 
 def main():
@@ -121,18 +136,26 @@ def main():
     notes = array_to_chart(rec)
     malody = to_malody_notes(notes)
 
+    # 音频 (打包进 .mcz)
+    audio_path = audio_meta.get(str(args.song), {}).get("audio")
+    audio_name = os.path.basename(audio_path) if audio_path else None
+
     mc = make_mc(malody, args.song, title=ref.get("version", "AI"),
-                 version=f"AI Lv.{args.lv}", bpm=bpms[0][1])
-    out_path = os.path.join(args.out, f"ai_lv{args.lv}_song{args.song}.mc")
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(mc, f, ensure_ascii=False, indent=1)
+                 version=f"AI Lv.{args.lv}", bpm=bpms[0][1], audio_name=audio_name)
+    if audio_path and os.path.exists(audio_path):
+        out_path = os.path.join(args.out, f"ai_lv{args.lv}_song{args.song}.mcz")
+        save_mcz(mc, audio_path, out_path)
+    else:
+        out_path = os.path.join(args.out, f"ai_lv{args.lv}_song{args.song}.mc")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(mc, f, ensure_ascii=False, indent=1)
 
     # 统计
     from collections import Counter
     tc = Counter(n["type"] for n in notes)
     slides = sum(1 for n in notes if n["type"] == 2)
     seg_total = sum(len(n.get("seg", [])) for n in notes)
-    print(f"生成完成: {out_path}")
+    print(f"生成完成: {out_path} (含音频: {bool(audio_path)})")
     print(f"  note 总数 {len(notes)}, tap {tc[0]}, drag {tc[1]}, slide {slides} (seg 节点 {seg_total})")
     print(f"  时长 {rows*0.5:.0f} 拍, 平均密度 {len(notes)/(rows*0.5):.1f} note/拍")
 

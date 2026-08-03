@@ -102,12 +102,19 @@ def main():
 
     sc, seed, notes = best
     malody = to_malody_notes(notes)
+    audio_path = audio_meta.get(str(args.song), {}).get("audio")
+    audio_name = os.path.basename(audio_path) if audio_path else None
     mc = make_mc(malody, args.song, title=ref.get("version", "AI"),
-                 version=f"AI Lv.{args.lv}", bpm=bpms[0][1])
-    out_path = os.path.join(args.out, f"ai_best_lv{args.lv}_song{args.song}_seed{seed}.mc")
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(mc, f, ensure_ascii=False, indent=1)
-    print(f"\n最佳: seed={seed} 分={sc:.2f} -> {out_path}")
+                 version=f"AI Lv.{args.lv}", bpm=bpms[0][1], audio_name=audio_name)
+    if audio_path and os.path.exists(audio_path):
+        from generate import save_mcz
+        out_path = os.path.join(args.out, f"ai_best_lv{args.lv}_song{args.song}_seed{seed}.mcz")
+        save_mcz(mc, audio_path, out_path)
+    else:
+        out_path = os.path.join(args.out, f"ai_best_lv{args.lv}_song{args.song}_seed{seed}.mc")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(mc, f, ensure_ascii=False, indent=1)
+    print(f"\n最佳: seed={seed} 分={sc:.2f} -> {out_path} (含音频: {bool(audio_path)})")
 
 
 if __name__ == "__main__":
