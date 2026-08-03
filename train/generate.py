@@ -20,7 +20,8 @@ from vae import AutoencoderKL
 from diffusion import UNet, DDPM
 from convertor import array_to_chart, FPS, W_MAX
 from audio_align import align_mel
-LATENT_SCALE = 0.632
+LATENT_SCALE = [0.2732, 0.7144, 0.3273, 0.2301, 0.2052, 0.2667, 0.2719, 0.3148,
+                0.2903, 0.4250, 0.6842, 0.3241, 0.4672, 0.5662, 0.2370, 0.4088]  # per-channel
 
 
 def t_to_beat(t, denom=16):
@@ -132,7 +133,7 @@ def main():
     # 裁中间: 去掉开头/结尾各 1/8 (头尾边界伪影)
     crop = (gen_rows - rows) // 2
     z = z[:, :, crop:crop + rows, :]
-    z = z * LATENT_SCALE  # latent 归一化还原
+    z = z * torch.tensor(LATENT_SCALE, device=z.device).view(1, 16, 1, 1)  # per-channel 还原
 
     # 解码 -> 通道图 -> 谱面
     with torch.no_grad():

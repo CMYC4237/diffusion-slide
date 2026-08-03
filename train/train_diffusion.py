@@ -28,7 +28,9 @@ WINDOW_FRAMES = 1024
 LATENT_ROWS = WINDOW_FRAMES // 8          # 128
 LATENT_COLS = 32                          # 256 / 8
 LATENT_CH = 16
-LATENT_SCALE = 0.632  # 训练时 latent 归一化 (VAE 输出全局 std)
+# per-channel latent scale (50谱面x2窗口统计): 各通道除以自身 std, 让扩散面对 ~N(0,1)
+LATENT_SCALE = [0.2732, 0.7144, 0.3273, 0.2301, 0.2052, 0.2667, 0.2719, 0.3148,
+                0.2903, 0.4250, 0.6842, 0.3241, 0.4672, 0.5662, 0.2370, 0.4088]
 
 
 class LatentAudioDataset(Dataset):
@@ -45,6 +47,7 @@ class LatentAudioDataset(Dataset):
         self.mirror_p = mirror_p
         self._mel_cache = {}
         self._latent_cache = {}  # (谱面下标, 槽号) -> latent, 槽固定后可复用
+        self.latent_scale = torch.tensor(LATENT_SCALE, dtype=torch.float32, device=device).view(1, 16, 1, 1)
         # 窗口槽: (谱面下标, 槽号)
         self.slots = []
         for i, r in enumerate(self.recs):
@@ -96,7 +99,7 @@ class LatentAudioDataset(Dataset):
             x = torch.from_numpy(arr)[None].to(self.device)
             with torch.no_grad():
                 z = self.vae.encode(x)[0]  # (1, 16, 128, 32)
-            self._latent_cache[cache_key] = (z[0] / LATENT_SCALE).cpu().numpy()
+            self._latent_cache[cache_key] = (z[0] / self.latent_scale).cpu().numpy()
         latent = self._latent_cache[cache_key]
 
         # 镜像增强 (latent 空间翻转)
