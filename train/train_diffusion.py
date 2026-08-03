@@ -107,8 +107,13 @@ class LatentAudioDataset(Dataset):
         mel = self._mel(r["song_id"])
         if mel is not None:
             bpms = [[b[0], b[1]] for b in r["bpms"]] if r.get("bpms") else [[0.0, r["bpm"]]]
+            # 时间缩放增强: 随机变速 0.9~1.1x (谱面拍结构不变, 音频对齐关系随 bpm 变化)
+            rate = 1.0
+            if self.rng.random() < 0.4:
+                rate = self.rng.uniform(0.9, 1.1)
+            bpms_scaled = [[b, bpm * rate] for b, bpm in bpms]
             # 截取窗口对应段
-            ctx = align_mel(mel, bpms, n_rows=LATENT_ROWS + 4, latent_rows_per_beat=0.5)
+            ctx = align_mel(mel, bpms_scaled, n_rows=LATENT_ROWS + 4, latent_rows_per_beat=0.5)
             start_row = int(round(t_start / 0.5))
             ctx = ctx[start_row:start_row + LATENT_ROWS]
             if ctx.shape[0] < LATENT_ROWS:
