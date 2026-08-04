@@ -42,7 +42,9 @@ def main():
     scale = torch.tensor(LATENT_SCALE, device=args.device).view(16, 1, 1)
 
     mel = np.load("data/audio/10072_mel.npy")
-    ctx = torch.from_numpy(align_mel(mel, [[0.0, 87.0]], n_rows=132, latent_rows_per_beat=0.5)[:128])[None].to(args.device)
+    # 修复: ctx 从窗口起点 (10 拍) 对齐, 与 z_real 窗口一致 (此前错位 10 拍导致假象)
+    ctx = torch.from_numpy(align_mel(mel, [[0.0, 87.0]], n_rows=132, latent_rows_per_beat=0.5,
+                                     t_start=10.0)[:128])[None].to(args.device)
 
     print("=== 1) 生成 latent per-channel std (归一化后应≈1) ===")
     zs = []
@@ -69,8 +71,9 @@ def main():
         xt = ddpm.q_sample(z_real, t, noise)
         with torch.no_grad():
             eps_pred = unet(xt, t, torch.tensor([12], device=args.device), ctx)
-        x0 = ddpm.sqrt_recip_alphas_cumprod[t] * xt - ddpm.sqrt_recipm1_alphas_cumprod[t] * eps_pred
-        print(f"  t={t_val}: 还原误差 {float((x0 - z_real).abs().mean()):.4f} (归一化后 latent 误差<0.5 算好)")
+        # eps MAE 直接测 (x0 还原误差被 1/sqrt(a) 放大数十倍, 有误导性)
+        eps_mae = float((eps_pred - noise).abs().mean())
+        print(f"  t={t_val}: eps MAE = {eps_mae:.4f} (噪声单位, <0.3 算好)")
 
     print("\n=== 3) decode 概率分布 (阈值 0.5 二值化影响) ===")
     with torch.no_grad():

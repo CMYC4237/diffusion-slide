@@ -77,7 +77,7 @@ def main():
     ddpm.eval()
 
     ctx = torch.from_numpy(align_mel(mel, bpms, n_rows=args.rows + args.rows // 4 + 4, latent_rows_per_beat=0.5)[:args.rows + args.rows // 4])[None].to(args.device)
-    lv_t = torch.tensor([args.lv], device=args.device)
+    lv_t = torch.tensor([args.lv + 1], device=args.device)
 
     gen_rows = args.rows + args.rows // 4
     crop = (gen_rows - args.rows) // 2
@@ -89,7 +89,8 @@ def main():
             z = ddpm.sample((1, 16, gen_rows, 32), lv=lv_t, audio_ctx=ctx,
                             steps=args.steps, cfg_scale=args.cfg, device=args.device)
             z = z[:, :, crop:crop + args.rows, :]
-            z = z * torch.tensor([0.2732, 0.7144, 0.3273, 0.2301, 0.2052, 0.2667, 0.2719, 0.3148, 0.2903, 0.4250, 0.6842, 0.3241, 0.4672, 0.5662, 0.2370, 0.4088], device=z.device).view(16, 1, 1)
+            z = z * torch.tensor([0.2940, 0.7292, 0.3580, 0.2502, 0.2233, 0.2907, 0.2922, 0.3284, 0.3222, 0.4417, 0.6906, 0.3618, 0.4912, 0.5780, 0.2578, 0.4207], device=z.device).view(16, 1, 1)
+            + torch.tensor([0.0924, 0.6350, 0.6057, -0.3221, 0.3398, 0.2305, 0.2297, 0.1997, 0.6799, 1.0758, 0.0394, -0.2274, -0.9928, 0.1380, -0.0272, -0.2712], device=z.device).view(16, 1, 1)
             rec = torch.sigmoid(vae.decode(z))[0].cpu().numpy()
         notes = array_to_chart(rec)
         for n in notes:

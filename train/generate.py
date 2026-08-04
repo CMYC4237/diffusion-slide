@@ -20,8 +20,10 @@ from vae import AutoencoderKL
 from diffusion import UNet, DDPM
 from convertor import array_to_chart, FPS, W_MAX
 from audio_align import align_mel
-LATENT_SCALE = [0.2732, 0.7144, 0.3273, 0.2301, 0.2052, 0.2667, 0.2719, 0.3148,
-                0.2903, 0.4250, 0.6842, 0.3241, 0.4672, 0.5662, 0.2370, 0.4088]  # per-channel
+LATENT_MEAN = [0.0924, 0.6350, 0.6057, -0.3221, 0.3398, 0.2305, 0.2297, 0.1997,
+                0.6799, 1.0758, 0.0394, -0.2274, -0.9928, 0.1380, -0.0272, -0.2712]
+LATENT_STD = [0.2940, 0.7292, 0.3580, 0.2502, 0.2233, 0.2907, 0.2922, 0.3284,
+              0.3222, 0.4417, 0.6906, 0.3618, 0.4912, 0.5780, 0.2578, 0.4207]
 
 
 def t_to_beat(t, denom=16):
@@ -119,7 +121,7 @@ def main():
     ctx = align_mel(mel, bpms, n_rows=gen_rows + 4, latent_rows_per_beat=0.5)
     ctx = ctx[:gen_rows]
     ctx = torch.from_numpy(ctx)[None].to(args.device)
-    lv = torch.tensor([args.lv], device=args.device)
+    lv = torch.tensor([args.lv + 1], device=args.device)  # 训练时 lv 已 +1 (0=null)
 
     # 采样 (长窗口分块: 128 行 = 64 拍)
     n_chunks = 1
@@ -133,7 +135,9 @@ def main():
     # 裁中间: 去掉开头/结尾各 1/8 (头尾边界伪影)
     crop = (gen_rows - rows) // 2
     z = z[:, :, crop:crop + rows, :]
-    z = z * torch.tensor(LATENT_SCALE, device=z.device).view(16, 1, 1)  # per-channel 还原
+    zm = torch.tensor(LATENT_MEAN, device=z.device).view(16, 1, 1)
+    zs = torch.tensor(LATENT_STD, device=z.device).view(16, 1, 1)
+    z = z * zs + zm  # latent 标准化还原
 
     # 解码 -> 通道图 -> 谱面
     with torch.no_grad():

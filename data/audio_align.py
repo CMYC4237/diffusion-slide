@@ -27,15 +27,16 @@ def beat_to_seconds(bpms, beat):
     return sec
 
 
-def align_mel(mel, bpms, n_rows, latent_rows_per_beat=0.5, sr=SR, hop=HOP):
+def align_mel(mel, bpms, n_rows, latent_rows_per_beat=0.5, sr=SR, hop=HOP, t_start=0.0):
     """把全曲 mel (T, n_mels) 对齐到 latent 行。
-    第 i 行的谱面拍 = i * latent_rows_per_beat (拍), 取对应秒的 mel 帧 (线性插值)。
+    第 i 行的谱面拍 = t_start + i * latent_rows_per_beat (拍), 取对应秒的 mel 帧 (线性插值)。
+    t_start: 窗口起点拍 (修复: 此前只从 beat 0 生成, 窗口起点超出即越界全零)
     返回 (n_rows, n_mels) float32
     """
     n_mels = mel.shape[1]
     out = np.zeros((n_rows, n_mels), dtype=np.float32)
     for i in range(n_rows):
-        beat = i * latent_rows_per_beat
+        beat = t_start + i * latent_rows_per_beat
         sec = beat_to_seconds(bpms, beat)
         fpos = sec * sr / hop
         fi = int(np.floor(fpos))

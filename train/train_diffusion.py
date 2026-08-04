@@ -28,9 +28,11 @@ WINDOW_FRAMES = 1024
 LATENT_ROWS = WINDOW_FRAMES // 8          # 128
 LATENT_COLS = 32                          # 256 / 8
 LATENT_CH = 16
-# per-channel latent scale (50谱面x2窗口统计): 各通道除以自身 std, 让扩散面对 ~N(0,1)
-LATENT_SCALE = [0.2732, 0.7144, 0.3273, 0.2301, 0.2052, 0.2667, 0.2719, 0.3148,
-                0.2903, 0.4250, 0.6842, 0.3241, 0.4672, 0.5662, 0.2370, 0.4088]
+# per-channel latent 标准化 (60谱面x3窗口统计): (x-mean)/std, 让扩散面对 ~N(0,1)
+LATENT_MEAN = [0.0924, 0.6350, 0.6057, -0.3221, 0.3398, 0.2305, 0.2297, 0.1997,
+               0.6799, 1.0758, 0.0394, -0.2274, -0.9928, 0.1380, -0.0272, -0.2712]
+LATENT_STD = [0.2940, 0.7292, 0.3580, 0.2502, 0.2233, 0.2907, 0.2922, 0.3284,
+              0.3222, 0.4417, 0.6906, 0.3618, 0.4912, 0.5780, 0.2578, 0.4207]
 
 
 class LatentAudioDataset(Dataset):
@@ -47,7 +49,8 @@ class LatentAudioDataset(Dataset):
         self.mirror_p = mirror_p
         self._mel_cache = {}
         self._latent_cache = {}  # (谱面下标, 槽号) -> latent, 槽固定后可复用
-        self.latent_scale = torch.tensor(LATENT_SCALE, dtype=torch.float32, device=device).view(16, 1, 1)
+        self.latent_mean = torch.tensor(LATENT_MEAN, dtype=torch.float32, device=device).view(16, 1, 1)
+        self.latent_std = torch.tensor(LATENT_STD, dtype=torch.float32, device=device).view(16, 1, 1)
         # 窗口槽: (谱面下标, 槽号)
         self.slots = []
         for i, r in enumerate(self.recs):
@@ -99,7 +102,7 @@ class LatentAudioDataset(Dataset):
             x = torch.from_numpy(arr)[None].to(self.device)
             with torch.no_grad():
                 z = self.vae.encode(x)[0]  # (1, 16, 128, 32)
-            self._latent_cache[cache_key] = (z[0] / self.latent_scale).cpu().numpy()
+            self._latent_cache[cache_key] = ((z[0] - self.latent_mean) / self.latent_std).cpu().numpy()
         latent = self._latent_cache[cache_key]
 
         # 镜像增强 (latent 空间翻转)
@@ -115,10 +118,9 @@ class LatentAudioDataset(Dataset):
             if self.rng.random() < 0.4:
                 rate = self.rng.uniform(0.9, 1.1)
             bpms_scaled = [[b, bpm * rate] for b, bpm in bpms]
-            # 截取窗口对应段
-            ctx = align_mel(mel, bpms_scaled, n_rows=LATENT_ROWS + 4, latent_rows_per_beat=0.5)
-            start_row = int(round(t_start / 0.5))
-            ctx = ctx[start_row:start_row + LATENT_ROWS]
+            # 窗口对齐修复: 直接生成从 t_start 起的窗口段 (修复 93.8% 窗口越界全零 bug)
+            ctx = align_mel(mel, bpms_scaled, n_rows=LATENT_ROWS + 4, latent_rows_per_beat=0.5,
+                            t_start=t_start)[:LATENT_ROWS]
             if ctx.shape[0] < LATENT_ROWS:
                 ctx = np.pad(ctx, ((0, LATENT_ROWS - ctx.shape[0]), (0, 0)))
             # 音频增强: 频带 mask (随机抹 1-2 个连续频带, 模拟信息缺失)
@@ -132,15 +134,15 @@ class LatentAudioDataset(Dataset):
                 shift = self.rng.choice([-1, 1])
                 ctx = np.roll(ctx, shift, axis=1)
         else:
-            ctx = np.zeros((LATENT_ROWS, 128), dtype=np.float32)
+            ctx = np.full((LATENT_ROWS, 128), -80.0, dtype=np.float32)
 
-        lv = r["lv"] if r["lv"] is not None else 0
+        lv = (r["lv"] if r["lv"] is not None else 0) + 1  # 1~26, 0 专用于 CFG null (修复 lv=0 双重语义)
 
-        # 条件丢弃 (CFG)
+        # 条件丢弃 (CFG): null ctx 用 -80 (无声, 而非 0=最大响度)
         use_cond = self.rng.random() >= self.cond_drop_p
         if not use_cond:
             lv = 0
-            ctx = np.zeros_like(ctx)
+            ctx = np.full_like(ctx, -80.0)
 
         return {
             "latent": torch.from_numpy(latent),
