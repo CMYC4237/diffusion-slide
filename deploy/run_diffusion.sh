@@ -10,9 +10,11 @@ EPOCHS=${EPOCHS:-80}
 BATCH=${BATCH:-8}
 SAMPLES=${SAMPLES:-5000}
 VAE_CKPT=${VAE_CKPT:-checkpoints/vae/best.ckpt}
+OUT=${OUT:-checkpoints/diffusion}
 GPUS=${GPUS:-0,2}
 export CUDA_VISIBLE_DEVICES=$GPUS
 echo "使用物理卡: $CUDA_VISIBLE_DEVICES (可用 GPUS=1,3 bash $0 覆盖)"
+echo "输出目录: $OUT"
 
 RESUME_FLAG=""
 if [ "${RESUME:-0}" = "1" ]; then
@@ -27,6 +29,6 @@ torchrun --nproc_per_node=2 --master_port=29501 \
     train/train_diffusion.py \
     --epochs "$EPOCHS" --batch "$BATCH" --lr 1e-4 \
     --vae_ckpt "$VAE_CKPT" \
-    --samples_per_epoch "$SAMPLES" --out checkpoints/diffusion --dist $RESUME_FLAG
+    --samples_per_epoch "$SAMPLES" --out "$OUT" --dist $RESUME_FLAG
 
-echo "完成: checkpoints/diffusion/last.ckpt"
+echo "完成: $OUT/last.ckpt"
