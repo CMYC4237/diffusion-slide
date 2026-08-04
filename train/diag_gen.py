@@ -74,7 +74,7 @@ def main():
 
     print("\n=== 3) decode 概率分布 (阈值 0.5 二值化影响) ===")
     with torch.no_grad():
-        rec = torch.sigmoid(vae.decode(zs[0:1] * scale))[0].cpu().numpy()
+        rec = torch.sigmoid(vae.decode(torch.from_numpy(zs[0:1]).to(args.device) * scale))[0].cpu().numpy()
     for c, name in [(0, "tap_mask"), (2, "drag_mask"), (4, "slide_mask")]:
         v = rec[c]
         frac_hi = (v > 0.7).mean() * 100

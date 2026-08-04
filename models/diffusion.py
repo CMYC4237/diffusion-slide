@@ -219,7 +219,11 @@ class DDPM(nn.Module):
             target = noise
         else:
             target = x0
-        return F.mse_loss(pred, target, reduction="mean")
+        # min-SNR 加权 (按信噪比平衡各时间步梯度, 改善高噪声步预测)
+        snr = self.alphas_cumprod[t] / (1 - self.alphas_cumprod[t] + 1e-12)
+        w = torch.minimum(snr, torch.full_like(snr, 5.0))
+        loss = F.mse_loss(pred, target, reduction="none").mean(dim=(1, 2, 3))
+        return (w * loss).mean()
 
     @torch.no_grad()
     def sample(self, shape, lv=None, audio_ctx=None, steps=250, eta=0.0,
